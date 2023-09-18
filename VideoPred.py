@@ -9,13 +9,14 @@ import glob
 import torch.optim as optim
 import piqa
 from dataset import VideoDataset
-
+import matplotlib.pyplot as plt
 video_len = 2
-path = "/home/miles/桌面/inpaint/VideoPred/data/taiwan_monitor"
-img_size=128 
+path = "C:/Users/許廷豪/data/taiwan_monitor"
+# path = "C:/Users/許廷豪/data/onlytwo"
+img_size= 128
 
 EPOCH = 100000
-BATCH= 64
+BATCH= 32
 device = "cuda"
 
     
@@ -24,18 +25,22 @@ dataloader = DataLoader(dataset,batch_size=BATCH,shuffle=True)
 
     
 # model = VideoPredModel(3,64,512,3,3,10,6,6,10,0.1).to(device)
-encoder = Encoder(output_channel=512,hidden_channel=128,num_layer=3).to("cuda")
-decoder = Decoder(input_channel=512,hidden_channel=128,num_layer=3).to("cuda")
-print(encoder)
-print(decoder)
+encoder = Encoder(output_channel=128,hidden_channel=128,num_layer=3).to("cuda")
+decoder = Decoder(input_channel=128,hidden_channel=128,num_layer=3).to("cuda")
+#8192
+# print(encoder)
+# print(decoder)
 opt_encoder = optim.Adam(encoder.parameters(),lr=1e-4)
 opt_decoder = optim.Adam(decoder.parameters(),lr=1e-4)
-ssim = piqa.MS_SSIM().cuda()
+scheduler_encoder = th.optim.lr_scheduler.ReduceLROnPlateau(opt_encoder, factor=0.1, patience=10)
+scheduler_decoder = th.optim.lr_scheduler.ReduceLROnPlateau(opt_decoder, factor=0.1, patience=10)
+ssim = piqa.SSIM().cuda()
 mse = nn.MSELoss()
+mae = nn.L1Loss(reduction="mean")
 cl = nn.L1Loss()
-# encoder.load_state_dict(th.load("encoder.pth"))
-# decoder.load_state_dict(th.load("decoder.pth"))
-criterion = piqa.MS_SSIM(window_size=7).cuda()
+encoder.load_state_dict(th.load("encoder.pth"))
+decoder.load_state_dict(th.load("decoder.pth"))
+criterion = None #piqa.MS_SSIM(7).cuda()
 
 
 from tqdm import tqdm
@@ -51,34 +56,40 @@ for epoch in range(EPOCH):
         opt_encoder.zero_grad()
         opt_decoder.zero_grad()
         output = decoder(encoder(data))
-        if criterion is None:
-            criterion = th.jit.trace(ssim, (data.view(-1,C,W,H), output.view(-1,C,W,H)))
+        # if criterion is None:
+        #     criterion = th.jit.trace(ssim, (data.view(-1,C,W,H), output.view(-1,C,W,H)))
         # print(data.min(),output.min())
-        if isinstance(criterion,nn.MSELoss):
-            loss = criterion(data.view(-1,C,W,H),output.view(-1,C,W,H))
+        # if isinstance(criterion,nn.MSELoss):
+        #     loss = criterion(data.view(-1,C,W,H),output.view(-1,C,W,H))
         # else:
         #     loss = 1-criterion(data.view(-1,C,W,H),output.view(-1,C,W,H))
         # print(loss)
-        loss = mse(data.view(-1,C,W,H),output.view(-1,C,W,H))+1-criterion(data.view(-1,C,W,H),output.view(-1,C,W,H))
+        loss = mse(data.view(-1,C,W,H),output.view(-1,C,W,H))#1-criterion(data.view(-1,C,W,H),output.view(-1,C,W,H))
         loss.backward()
         opt_encoder.step()
         opt_decoder.step()
         total_loss+=loss.item()
+        
         # print(loss)
         # break
     print("Epoch:{},Loss:{}".format(epoch+1,total_loss))
+    encoder.eval()
+    decoder.eval()
+        
     if (epoch+1)%100==0:
-        encoder.eval()
-        decoder.eval()
-        data=dataset[0].view(1,*dataset[0].shape)
-        # transforms.ToPILImage()(data.to("cpu")[0][0]).show()
-        output = decoder(encoder(data.to(device)))
-        # print(output.to("cpu")[0][0])
-        # transforms.ToPILImage()(output.to("cpu")[0][0]).show()
-        transforms.ToPILImage()(output.to("cpu")[0][0]).save("{}.jpg".format(epoch+1))
+        img1 = transforms.ToPILImage()(output.to("cpu")[0][0])
+        img2 = transforms.ToPILImage()(data.to("cpu")[0][0])
+        plt.figure(figsize=(10,10))
+        plt.subplot(221)
+        plt.imshow(img1)
+        plt.subplot(222)
+        plt.imshow(img2)
+        plt.savefig('{}.png'.format(0))
+        # transforms.ToPILImage()(output.to("cpu")[0][0]).save("{}.jpg".format(epoch+1))
         print("Image Saved!")
+        plt.close()
             
-    if epoch%100==0:
-        th.save(encoder.state_dict(),"encoder.pth")
-        th.save(decoder.state_dict(),"decoder.pth")
+    if (epoch+1)%100==0:
+        th.save(encoder.state_dict(),"encoder.pth".format(epoch+1))
+        th.save(decoder.state_dict(),"decoder.pth".format(epoch+1))
 

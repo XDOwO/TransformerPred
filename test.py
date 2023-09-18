@@ -12,7 +12,7 @@ import piqa
 from dataset import VideoDataset
 import matplotlib.pyplot as plt
 video_len = 2
-path = "/home/miles/桌面/inpaint/guided-diffusion/video_img"
+path = "C:/Users/許廷豪/data/taiwan_monitor"
 img_size=128
 EPOCH = 1000000
 BATCH= 4
@@ -24,12 +24,12 @@ dataloader = DataLoader(dataset,batch_size=BATCH,shuffle=True)
 
     
 # model = VideoPredModel(3,64,512,3,3,10,6,6,10,0.1).to(device)
-encoder = Encoder(output_channel=512,hidden_channel=128,num_layer=3).to("cuda")
-decoder = Decoder(input_channel=512,hidden_channel=128,num_layer=3).to("cuda")
+encoder = Encoder(output_channel=128,hidden_channel=128,num_layer=3).to("cuda")
+decoder = Decoder(input_channel=128,hidden_channel=128,num_layer=3).to("cuda")
 model = TempAutoEncoder().to("cuda")
 # opt = optim.Adam(model.parameters(),lr=1e-4)
 ssim = piqa.MS_SSIM(7).cuda()
-criterion = None # nn.MSELoss()
+criterion = piqa.SSIM().cuda() # nn.MSELoss()
 
 
 
@@ -74,6 +74,8 @@ encoder.load_state_dict(th.load("encoder.pth"))
 decoder.load_state_dict(th.load("decoder.pth"))
 # model.load_state_dict(th.load("model.pth"))
 i=0
+encoder.eval()
+decoder.eval()
 for data in dataloader:
     N,T,C,W,H = data.shape
     # output = model(data.to(device))
@@ -81,7 +83,7 @@ for data in dataloader:
     # print(output.to("cpu")[0][0])
     for x in range(video_len):
         # print(x*10+i)
-        img1 = transforms.ToPILImage()(output.to("cpu")[0][x])
+        img1 = transforms.ToPILImage()(output.to("cpu")[0][x]).convert("RGB")
         img2 = transforms.ToPILImage()(data.to("cpu")[0][x])
         plt.figure(figsize=(10,10))
         plt.subplot(221)
@@ -89,7 +91,8 @@ for data in dataloader:
         plt.subplot(222)
         plt.imshow(img2)
         plt.savefig('{}.png'.format(x+i*video_len))
-    print(ssim(data.to(device).view(-1,C,W,H),output.view(-1,C,W,H)).item())
+    print("MS_SSIM",ssim(data.to(device).view(-1,C,W,H),output.view(-1,C,W,H)).item())
+    print("SSIM",criterion(data.to(device).view(-1,C,W,H),output.view(-1,C,W,H)).item())
     i+=1
     if i==5:
         break

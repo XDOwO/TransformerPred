@@ -68,11 +68,11 @@ class Encoder(nn.Module):
         self.kernel_size = kernel_size
         self.num_layer = num_layer
         if num_layer==0:
-            self.module = [EncoderBlock(input_channel,output_channel,kernel_size,stride=stride,padding=padding,img_size=128)]
+            self.module = [EncoderBlock(input_channel,output_channel,kernel_size,stride=stride,padding=padding,img_size=img_size)]
         else:
-            self.module = [EncoderBlock(input_channel,hidden_channel,kernel_size,stride=stride,padding=padding,img_size=128)]+\
-                                     [EncoderBlock(hidden_channel,hidden_channel,kernel_size,stride=stride,padding=padding,img_size=128//2**(i+1)) for i in range((num_layer-1))]+\
-                                     [EncoderBlock(hidden_channel,output_channel,kernel_size,stride=stride,padding=padding,img_size=128//2**num_layer)]
+            self.module = [EncoderBlock(input_channel,hidden_channel,kernel_size,stride=stride,padding=padding,img_size=img_size)]+\
+                                     [EncoderBlock(hidden_channel,hidden_channel,kernel_size,stride=stride,padding=padding,img_size=img_size//2**(i+1)) for i in range((num_layer-1))]+\
+                                     [EncoderBlock(hidden_channel,output_channel,kernel_size,stride=stride,padding=padding,img_size=img_size//2**num_layer)]
         self.module += [ResBlock(output_channel,output_channel)]*resblock_num
         self.module = nn.Sequential(*self.module)
         for layer in self.modules():
@@ -83,15 +83,22 @@ class Encoder(nn.Module):
         return self.module(x)
 
 class DecoderBlock(nn.Module):
-    def __init__(self,input_channel,output_channel,kernel_size,stride=2,padding=1,have_relu=True,upsample="t_conv"):
+    def doing_nothing(self,x):
+        return 0
+    def __init__(self,input_channel,output_channel,kernel_size,stride=2,padding=1,have_relu=True,upsample="scale"):
         super(DecoderBlock,self).__init__()
         if upsample=="t_conv":
-            self.module=nn.Sequential(nn.ConvTranspose2d(input_channel,output_channel,kernel_size,stride,padding,output_padding=1))
-        else:
-            self.upsample = nn.Upsample(scale_factor=2)
+            self.t_conv=nn.Sequential(nn.ConvTranspose2d(input_channel,output_channel,kernel_size,stride,padding,output_padding=1))
+            self.scale=self.doing_nothing
+        elif upsample=="scale":
+            self.upsample = nn.Upsample(scale_factor=2,mode = 'bilinear')
             self.pad = nn.ReplicationPad2d(1)
-            self.conv = nn.Conv2d(input_channel,output_channel,kernel_size)
-            self.module=nn.Sequential(nn.Upsample(scale_factor=2),nn.ReplicationPad2d(1),nn.Conv2d(input_channel,output_channel,kernel_size))
+            self.conv = nn.Conv2d(input_channel,output_channel, kernel_size=3, stride=1, padding=0)
+            self.scale=nn.Sequential(self.upsample,self.pad,self.conv)
+            self.t_conv=self.doing_nothing
+        else:
+            self.t_conv=nn.Sequential(nn.ConvTranspose2d(input_channel,output_channel,kernel_size,stride,padding,output_padding=1))
+            self.scale=nn.Sequential(nn.Upsample(scale_factor=2),nn.ReplicationPad2d(1),nn.Conv2d(input_channel,output_channel,kernel_size))
         self.bn=nn.BatchNorm2d(output_channel)
         self.relu=nn.ReLU()
         # self.nn_size = list(zip(nn_size[:-1],nn_size[1:]))
@@ -100,9 +107,9 @@ class DecoderBlock(nn.Module):
     def forward(self,x):
 
         if self.have_relu:
-            x=self.relu(self.bn(self.module(x)))
+            x=self.relu(self.bn(self.scale(x)))
         else:
-            x=self.bn(self.module(x))
+            x=self.bn(self.scale(x))
         # print(x.shape)
         # B,C,W,H = x.shape
         # x=x.view(B,C*W*H)
@@ -132,6 +139,8 @@ class Decoder(nn.Module):
         # self.nns =nn.ModuleList([i for sublist in [[nn.Linear(i,o),nn.BatchNorm1d(o)] for i,o in self.nnlist] for i in sublist ])
         self.sigmoid = nn.Sigmoid()
         self.relu = nn.ReLU()
+        # self.last_cnn=nn.Sequential(nn.ReplicationPad2d(3),nn.Conv2d(output_channel,output_channel,7,padding=0))
+        # self.linear=nn.Sequential(nn.Linear(3*128*128,4096),nn.Linear(4096,3*128*128))
         self.video_len = video_len
         for layer in self.modules():
             if isinstance(layer,nn.ConvTranspose2d):
@@ -139,15 +148,17 @@ class Decoder(nn.Module):
     def forward(self,x):
         for f in self.transposed_cnn:
             x = f(x)
-        # B,C,W,H = x.shape
+        # x = self.relu(x)
+        # x = self.last_cnn(x)
         # x = x.view(B,C*W*H)
+        # x = self.linear(x)
         # for f in self.nns[:-1]:
         #     x = f(x)
         #     x = self.relu(x)
         # x = self.nns[-1](x)
-        # x = x.view(B,3,self.image_size,self.image_size)
         x = self.sigmoid(x)
-        return x.view(-1,self.video_len,self.output_channel,self.image_size,self.image_size)
+        return x.view(-1,self.video_len,3,self.image_size,self.image_size)
+
 
 
 
